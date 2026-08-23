@@ -31,7 +31,16 @@ pipeline {
                 checkout scm
             }
         }
-
+        stage('Debug Java') {
+            steps {
+                sh 'echo "PATH=$PATH"'
+                sh 'echo "JAVA_HOME=$JAVA_HOME"'
+                sh 'which java || echo "java not found on PATH"'
+                sh 'java -version'
+                sh 'which javac || echo "javac not found on PATH"'
+                sh 'javac -version'
+            }
+        }
         stage('Build') {
             steps {
                 sh 'chmod +x mvnw'
