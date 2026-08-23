@@ -2,26 +2,20 @@ pipeline {
     agent any
 
     // ---------------------------------------------------------
-    // Tools: make sure these names match what's configured in
-    // Manage Jenkins -> Global Tool Configuration
-    // ---------------------------------------------------------
-    tools {
-        maven 'Maven-3.9.16'   // Name of Maven install in Jenkins Global Tool Config
-        jdk   'JDK-21'         // Name of JDK install in Jenkins Global Tool Config
-    }
-
-    // ---------------------------------------------------------
-    // Environment variables - customize these for your project
+    // Non-sensitive settings only. Server address, username, and
+    // the SSH key all live in Jenkins Credentials (see setup notes
+    // below) - nothing identifying is stored in this file.
     // ---------------------------------------------------------
     environment {
         APP_NAME        = 'identity-service'
-        IMAGE_NAME      = 'identity-service'                           // local image name (no registry needed)
-        DEPLOY_SERVER   = 'deploy@15.134.232.121'                // <-- CHANGE (matches SSH credential username/host)
-        DEPLOY_SSH_CRED = 'build-server-ssh'                      // Jenkins SSH credential ID from Step 2
-        DEPLOY_PORT     = '8083'                                       // Host port for the container
-        CONTAINER_PORT  = '8083'                                       // Port app listens on inside container
+        IMAGE_NAME      = 'identity-service'
+        DEPLOY_PORT     = '8083'
+        CONTAINER_PORT  = '8083'
         IMAGE_TAG       = "${env.BUILD_NUMBER}"
         TAR_FILE        = "${APP_NAME}-${env.BUILD_NUMBER}.tar"
+
+        DEPLOY_SERVER   = 'deploy@15.134.232.121'                // <-- CHANGE (matches SSH credential username/host)
+        DEPLOY_SSH_CRED = 'build-server-ssh'                      // Jenkins SSH credential ID from Step 2
     }
 
     options {
@@ -78,29 +72,33 @@ pipeline {
 
         stage('Transfer Image to Production') {
             steps {
-                sshagent(credentials: [DEPLOY_SSH_CRED]) {
-                    sh """
-                        scp -o StrictHostKeyChecking=no ${TAR_FILE} ${DEPLOY_SERVER}:/tmp/${TAR_FILE}
-                    """
+                withCredentials([string(credentialsId: DEPLOY_HOST_CRED, variable: 'DEPLOY_SERVER')]) {
+                    sshagent(credentials: ['deploy-server-ssh-key']) {
+                        sh """
+                            scp -o StrictHostKeyChecking=no ${TAR_FILE} ${DEPLOY_SERVER}:/tmp/${TAR_FILE}
+                        """
+                    }
                 }
             }
         }
 
         stage('Deploy on Production') {
             steps {
-                sshagent(credentials: [DEPLOY_SSH_CRED]) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} '
-                            docker load -i /tmp/${TAR_FILE} &&
-                            docker stop ${APP_NAME} || true &&
-                            docker rm ${APP_NAME} || true &&
-                            docker run -d --name ${APP_NAME} \
-                                -p ${DEPLOY_PORT}:${CONTAINER_PORT} \
-                                --restart unless-stopped \
-                                ${IMAGE_NAME}:${IMAGE_TAG} &&
-                            rm -f /tmp/${TAR_FILE}
-                        '
-                    """
+                withCredentials([string(credentialsId: DEPLOY_HOST_CRED, variable: 'DEPLOY_SERVER')]) {
+                    sshagent(credentials: ['deploy-server-ssh-key']) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} '
+                                docker load -i /tmp/${TAR_FILE} &&
+                                docker stop ${APP_NAME} || true &&
+                                docker rm ${APP_NAME} || true &&
+                                docker run -d --name ${APP_NAME} \
+                                    -p ${DEPLOY_PORT}:${CONTAINER_PORT} \
+                                    --restart unless-stopped \
+                                    ${IMAGE_NAME}:${IMAGE_TAG} &&
+                                rm -f /tmp/${TAR_FILE}
+                            '
+                        """
+                    }
                 }
             }
         }
