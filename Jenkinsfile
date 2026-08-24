@@ -17,7 +17,7 @@ pipeline {
         TAR_FILE        = "${APP_NAME}-${env.BUILD_NUMBER}.tar"
 
         DEPLOY_SERVER   = 'deploy@15.134.232.121'                // <-- CHANGE (matches SSH credential username/host)
-        DEPLOY_SSH_CRED = 'build-server-ssh'                      // Jenkins SSH credential ID from Step 2
+        DEPLOY_HOST_CRED = 'build-server-ssh'                      // Jenkins SSH credential ID from Step 2
     }
 
     options {
