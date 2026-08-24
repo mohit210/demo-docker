@@ -15,9 +15,6 @@ pipeline {
         CONTAINER_PORT  = '8083'
         IMAGE_TAG       = "${env.BUILD_NUMBER}"
         TAR_FILE        = "${APP_NAME}-${env.BUILD_NUMBER}.tar"
-
-        DEPLOY_SERVER   = 'deploy@15.134.232.121'                // <-- CHANGE (matches SSH credential username/host)
-        DEPLOY_HOST_CRED = 'build-server-ssh'                      // Jenkins SSH credential ID from Step 2
     }
 
     options {
@@ -33,6 +30,7 @@ pipeline {
                 checkout scm
             }
         }
+
         stage('Debug Java') {
             steps {
                 sh 'echo "PATH=$PATH"'
@@ -43,6 +41,7 @@ pipeline {
                 sh 'javac -version'
             }
         }
+
         stage('Build') {
             steps {
                 sh 'chmod +x mvnw'
@@ -83,7 +82,7 @@ pipeline {
 
         stage('Transfer Image to Production') {
             steps {
-                withCredentials([string(credentialsId: DEPLOY_HOST_CRED, variable: 'DEPLOY_SERVER')]) {
+                withCredentials([string(credentialsId: 'deploy-server-host', variable: 'DEPLOY_SERVER')]) {
                     sshagent(credentials: ['deploy-server-ssh-key']) {
                         sh """
                             scp -o StrictHostKeyChecking=no ${TAR_FILE} ${DEPLOY_SERVER}:/tmp/${TAR_FILE}
@@ -95,7 +94,7 @@ pipeline {
 
         stage('Deploy on Production') {
             steps {
-                withCredentials([string(credentialsId: DEPLOY_HOST_CRED, variable: 'DEPLOY_SERVER')]) {
+                withCredentials([string(credentialsId: 'deploy-server-host', variable: 'DEPLOY_SERVER')]) {
                     sshagent(credentials: ['deploy-server-ssh-key']) {
                         sh """
                             ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} '
@@ -125,7 +124,13 @@ pipeline {
         always {
             // Clean up dangling local images and the tarball to save disk space on the build server
             sh "rm -f ${TAR_FILE} || true"
+            // Remove THIS build's tagged image too (not just dangling layers) -
+            // production already has its own copy via the transferred tarball,
+            // so keeping it on the build server just wastes disk space over time.
+            sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true"
             sh 'docker image prune -f || true'
+            // Also clear the Docker build cache periodically to prevent slow disk creep
+            sh 'docker builder prune -f --filter "until=24h" || true'
         }
     }
 }
