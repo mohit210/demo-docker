@@ -1,5 +1,7 @@
 pipeline {
-    agent any
+    agent {
+        label 'build'
+    }
 
     // ---------------------------------------------------------
     // Non-sensitive settings only. Server address, username, and
