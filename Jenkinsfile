@@ -89,7 +89,7 @@ pipeline {
                     gzip > /tmp/${IMAGE_NAME}-${BUILD_NUMBER}.tar.gz
 
                     scp \
-                    -i /home/jenkins/.ssh/jenkins_deploy_key \
+                    -i ~/.ssh/jenkins_deploy_key \
                     -o StrictHostKeyChecking=no \
                     /tmp/${IMAGE_NAME}-${BUILD_NUMBER}.tar.gz \
                     ${PROD_USER}@${PROD_HOST}:${PROD_DIR}/
@@ -97,7 +97,7 @@ pipeline {
 
                 sh '''
                     ssh \
-                    -i /home/jenkins/.ssh/jenkins_deploy_key \
+                    -i ~/.ssh/jenkins_deploy_key \
                     -o StrictHostKeyChecking=no \
                     ${PROD_USER}@${PROD_HOST} << EOF
 
