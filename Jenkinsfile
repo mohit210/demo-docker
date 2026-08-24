@@ -15,6 +15,15 @@ pipeline {
         CONTAINER_PORT  = '8083'
         IMAGE_TAG       = "${env.BUILD_NUMBER}"
         TAR_FILE        = "${APP_NAME}-${env.BUILD_NUMBER}.tar"
+
+        //EPLOY_SERVER   = 'deploy@15.134.232.121'                // <-- CHANGE (matches SSH credential username/host)
+        //DEPLOY_HOST_CRED = 'build-server-ssh'                      // Jenkins SSH credential ID from Step 2
+
+
+        PROD_HOST = '15.134.232.121'
+        PROD_USER = 'deploy'
+        PROD_DIR = '/opt/project'
+
     }
 
     options {
@@ -30,7 +39,6 @@ pipeline {
                 checkout scm
             }
         }
-
         stage('Debug Java') {
             steps {
                 sh 'echo "PATH=$PATH"'
@@ -41,7 +49,6 @@ pipeline {
                 sh 'javac -version'
             }
         }
-
         stage('Build') {
             steps {
                 sh 'chmod +x mvnw'
@@ -73,43 +80,47 @@ pipeline {
             }
         }
 
-        stage('Save Docker Image') {
+        stage('Deploy') {
             steps {
-                // Export the image to a tarball so it can be transferred without a registry
-                sh "docker save ${IMAGE_NAME}:${IMAGE_TAG} -o ${TAR_FILE}"
-            }
-        }
+                echo 'Deploying to production...'
 
-        stage('Transfer Image to Production') {
-            steps {
-                withCredentials([string(credentialsId: 'deploy-server-host', variable: 'DEPLOY_SERVER')]) {
-                    sshagent(credentials: ['deploy-server-ssh-key']) {
-                        sh """
-                            scp -o StrictHostKeyChecking=no ${TAR_FILE} ${DEPLOY_SERVER}:/tmp/${TAR_FILE}
-                        """
-                    }
-                }
-            }
-        }
+                sh '''
+                    docker save ${IMAGE_NAME}:${BUILD_NUMBER} | \
+                    gzip > /tmp/${IMAGE_NAME}-${BUILD_NUMBER}.tar.gz
 
-        stage('Deploy on Production') {
-            steps {
-                withCredentials([string(credentialsId: 'deploy-server-host', variable: 'DEPLOY_SERVER')]) {
-                    sshagent(credentials: ['deploy-server-ssh-key']) {
-                        sh """
-                            ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} '
-                                docker load -i /tmp/${TAR_FILE} &&
-                                docker stop ${APP_NAME} || true &&
-                                docker rm ${APP_NAME} || true &&
-                                docker run -d --name ${APP_NAME} \
-                                    -p ${DEPLOY_PORT}:${CONTAINER_PORT} \
-                                    --restart unless-stopped \
-                                    ${IMAGE_NAME}:${IMAGE_TAG} &&
-                                rm -f /tmp/${TAR_FILE}
-                            '
-                        """
-                    }
-                }
+                    scp \
+                    -i /home/jenkins/.ssh/jenkins_deploy_key \
+                    -o StrictHostKeyChecking=no \
+                    /tmp/${IMAGE_NAME}-${BUILD_NUMBER}.tar.gz \
+                    ${PROD_USER}@${PROD_HOST}:${PROD_DIR}/
+                '''
+
+                sh '''
+                    ssh \
+                    -i /home/jenkins/.ssh/jenkins_deploy_key \
+                    -o StrictHostKeyChecking=no \
+                    ${PROD_USER}@${PROD_HOST} << EOF
+
+                    cd ${PROD_DIR}
+
+                    gunzip -f ${IMAGE_NAME}-${BUILD_NUMBER}.tar.gz
+
+                    docker load \
+                    -i ${IMAGE_NAME}-${BUILD_NUMBER}.tar
+
+                    docker stop ${APP_NAME} || true
+                    docker rm ${APP_NAME} || true
+
+                    docker run -d \
+                    --name ${APP_NAME} \
+                    --restart unless-stopped \
+                    -p 80:5000 \
+                    ${IMAGE_NAME}:${BUILD_NUMBER}
+
+                    rm -f ${IMAGE_NAME}-${BUILD_NUMBER}.tar
+
+EOF
+                '''
             }
         }
     }
@@ -124,13 +135,7 @@ pipeline {
         always {
             // Clean up dangling local images and the tarball to save disk space on the build server
             sh "rm -f ${TAR_FILE} || true"
-            // Remove THIS build's tagged image too (not just dangling layers) -
-            // production already has its own copy via the transferred tarball,
-            // so keeping it on the build server just wastes disk space over time.
-            sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG} || true"
             sh 'docker image prune -f || true'
-            // Also clear the Docker build cache periodically to prevent slow disk creep
-            sh 'docker builder prune -f --filter "until=24h" || true'
         }
     }
 }
